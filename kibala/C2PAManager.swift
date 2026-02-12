@@ -1,6 +1,6 @@
 import Foundation
 import UIKit
-import C2PA
+@preconcurrency import C2PA
 import Combine
 import Security
 
@@ -48,7 +48,7 @@ enum C2PASigningError: LocalizedError {
 class C2PAManager: ObservableObject {
     static let shared = C2PAManager()
 
-    private let SERVER_URL = "http://192.168.178.45:8080"
+    private let SERVER_URL = "http://192.168.178.46:8080"
     private let KEY_TAG = "com.imanmontajabi.kibala.secure.key"
 
     @Published var isProcessing = false

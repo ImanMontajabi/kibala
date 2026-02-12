@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: - CameraView
+
 struct CameraView: View {
     @StateObject var cameraService = CameraService()
     @ObservedObject var c2paManager = C2PAManager.shared
@@ -9,279 +11,322 @@ struct CameraView: View {
     @State private var signedFileURL: URL?
     @State private var showShareSheet = false
     @State private var isPublished = false
+    @State private var showSettings = false
 
     var body: some View {
         ZStack {
-            if let image = cameraService.capturedImage {
+            // Full-black canvas behind everything
+            Color.black.ignoresSafeArea()
 
-                // ── Photo preview + action buttons ──
+            if let image = cameraService.capturedImage {
                 if let fileURL = signedFileURL {
-                    // After signing succeeded: show share/done UI
                     signedPhotoView(image: image, fileURL: fileURL)
                 } else {
-                    // Before signing: show retake/sign buttons
                     unsignedPhotoView(image: image)
                 }
-
             } else {
-                // ── Camera live preview ──
                 cameraLiveView
             }
         }
-        .onAppear {
-            cameraService.checkPermissions()
-        }
-        .alert("C2PA Signing Error", isPresented: $showError) {
-            Button("OK", role: .cancel) { }
+        .onAppear { cameraService.checkPermissions() }
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage)
         }
         .sheet(isPresented: $showShareSheet) {
-            if let url = signedFileURL {
-                ShareSheet(fileURL: url)
+            if let url = signedFileURL { ShareSheet(fileURL: url) }
+        }
+        .sheet(isPresented: $showSettings) { settingsSheet }
+    }
+
+    // MARK: - Camera Live View
+
+    private var cameraLiveView: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            // 16:9 cinematic preview
+            GeometryReader { geo in
+                let width = geo.size.width
+                let height = width * 16 / 9
+                CameraPreview(cameraService: cameraService)
+                    .frame(width: width, height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .frame(width: geo.size.width, height: geo.size.height)
+            }
+
+            Spacer(minLength: 0)
+
+            // ── Liquid Glass Tab Bar ──
+            glassTabBar
+                .padding(.bottom, 12)
+        }
+        .ignoresSafeArea(edges: .top)
+    }
+
+    // MARK: - Liquid Glass Tab Bar
+
+    private var glassTabBar: some View {
+        HStack(spacing: 0) {
+            // Settings
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 52, height: 52)
+            }
+
+            Spacer()
+
+            // Shutter
+            Button { cameraService.capturePhoto() } label: {
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.15))
+                        .frame(width: 72, height: 72)
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 72, height: 72)
+                    Circle()
+                        .stroke(.white.opacity(0.6), lineWidth: 3)
+                        .frame(width: 72, height: 72)
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 56, height: 56)
+                }
+            }
+
+            Spacer()
+
+            // Placeholder for symmetry
+            Color.clear
+                .frame(width: 52, height: 52)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 10)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule()
+                        .stroke(.white.opacity(0.25), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Settings Sheet
+
+    private var settingsSheet: some View {
+        NavigationView {
+            List {
+                Section {
+                    Button(role: .destructive) {
+                        C2PAManager.shared.resetCredentials()
+                        showSettings = false
+                    } label: {
+                        Label("Reset Credentials", systemImage: "trash")
+                    }
+                } header: {
+                    Text("Security")
+                } footer: {
+                    Text("Deletes the Secure Enclave key and cached certificate. A new key pair will be generated on the next signing.")
+                }
+
+                Section("About") {
+                    LabeledContent("App", value: "Kibala")
+                    LabeledContent("Signing", value: "C2PA / ES256")
+                    LabeledContent("Key Storage", value: "Secure Enclave")
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showSettings = false }
+                }
             }
         }
     }
 
-    // MARK: - Subviews
+    // MARK: - Unsigned Photo (Retake / Sign)
 
-    /// Shows the captured photo with Retake / Sign buttons.
     private func unsignedPhotoView(image: UIImage) -> some View {
-        VStack {
-            Spacer()
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
 
             Image(uiImage: image)
                 .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity)
-                .padding()
-                .shadow(radius: 10)
+                .scaledToFill()
+                .frame(
+                    width: UIScreen.main.bounds.width,
+                    height: UIScreen.main.bounds.width * 16 / 9
+                )
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            HStack(spacing: 40) {
-                Button(action: {
+            // Action pills
+            HStack(spacing: 14) {
+                glassPill(label: "Retake", icon: "arrow.counterclockwise", tint: .red.opacity(0.75)) {
                     cameraService.capturedImage = nil
                     signedFileURL = nil
-                }) {
-                    Text("Retake")
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.red.opacity(0.8))
-                        .cornerRadius(10)
                 }
                 .disabled(c2paManager.isProcessing)
 
-                Button(action: {
-                    Task {
-                        do {
-                            let url = try await c2paManager.signImage(image: image)
-                            signedFileURL = url
-                        } catch {
-                            errorMessage = error.localizedDescription
-                            showError = true
-                            print("❌ Error during Secure Save: \(error)")
-                        }
+                if c2paManager.isProcessing {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Signing…")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
                     }
-                }) {
-                    if c2paManager.isProcessing {
-                        HStack {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                            Text("Signing...")
-                                .foregroundColor(.black)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .cornerRadius(10)
-                    } else {
-                        Text("Save Secure (C2PA)")
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .background(Color.green)
-                            .cornerRadius(10)
-                    }
-                }
-                .disabled(c2paManager.isProcessing)
-            }
-            .padding(.bottom, 50)
-        }
-        .background(Color.black.edgesIgnoringSafeArea(.all))
-    }
-
-    /// Shows the signed photo with Share / New Photo buttons.
-    /// Share exports the RAW signed JPEG file (with C2PA metadata intact).
-    private func signedPhotoView(image: UIImage, fileURL: URL) -> some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity)
-                .padding()
-                .shadow(radius: 10)
-                .overlay(
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            Label(
-                                isPublished ? "Published via Gateway" : "C2PA Signed",
-                                systemImage: isPublished ? "globe.badge.chevron.backward" : "checkmark.seal.fill"
-                            )
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                                .padding(8)
-                                .background(isPublished ? Color.blue.opacity(0.85) : Color.green.opacity(0.85))
-                                .cornerRadius(8)
-                                .padding(12)
-                        }
-                    }
-                )
-
-            Spacer()
-
-            Text(isPublished
-                 ? "Published photo re-signed by the Privacy Gateway."
-                 : "Signed photo saved to app Documents.")
-                .font(.caption)
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-
-            Text(isPublished
-                 ? "The gateway's certificate replaces your device identity."
-                 : "Use **Share** to export, or **Publish** to re-sign via the gateway.")
-                .font(.caption2)
-                .foregroundColor(.gray.opacity(0.8))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-
-            HStack(spacing: 16) {
-                Button(action: {
-                    showShareSheet = true
-                }) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.blue)
-                        .cornerRadius(10)
-                }
-
-                if !isPublished {
-                    Button(action: {
-                        guard let url = signedFileURL else { return }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 13)
+                    .background(Capsule().fill(.ultraThinMaterial))
+                    .overlay(Capsule().stroke(.white.opacity(0.2), lineWidth: 0.5))
+                } else {
+                    glassPill(label: "Sign & Share", icon: "checkmark.seal.fill", tint: .green.opacity(0.65)) {
                         Task {
                             do {
-                                let publishedURL = try await c2paManager.uploadAndPublish(fileURL: url)
-                                signedFileURL = publishedURL
-                                isPublished = true
+                                let url = try await c2paManager.signImage(image: image)
+                                signedFileURL = url
                             } catch {
                                 errorMessage = error.localizedDescription
                                 showError = true
-                                print("❌ Publish error: \(error)")
                             }
-                        }
-                    }) {
-                        if c2paManager.isProcessing {
-                            HStack(spacing: 4) {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                                Text("Publishing...")
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.white)
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .background(Color.purple.opacity(0.7))
-                            .cornerRadius(10)
-                        } else {
-                            Label("Publish", systemImage: "arrow.up.forward.app")
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(Color.purple)
-                                .cornerRadius(10)
                         }
                     }
-                    .disabled(c2paManager.isProcessing)
+                }
+            }
+            .padding(.bottom, 28)
+        }
+    }
+
+    // MARK: - Signed Photo (Share / Publish / New)
+
+    private func signedPhotoView(image: UIImage, fileURL: URL) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            ZStack(alignment: .bottomTrailing) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(
+                        width: UIScreen.main.bounds.width,
+                        height: UIScreen.main.bounds.width * 16 / 9
+                    )
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                // Status badge
+                HStack(spacing: 5) {
+                    Image(systemName: isPublished ? "globe.badge.chevron.backward" : "checkmark.seal.fill")
+                    Text(isPublished ? "Published" : "Signed")
+                        .fontWeight(.semibold)
+                }
+                .font(.caption2)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(isPublished ? Color.blue.opacity(0.8) : Color.green.opacity(0.8))
+                        .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 0.5))
+                )
+                .padding(14)
+            }
+
+            Spacer(minLength: 0)
+
+            // Info text
+            VStack(spacing: 4) {
+                Text(isPublished
+                     ? "Published — photographer identity removed."
+                     : "Signed with C2PA. Ready to share or publish.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+
+                if !isPublished {
+                    Text("**Publish** sends to the gateway for anonymous re-signing.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 12)
+
+            // Action pills
+            HStack(spacing: 12) {
+                glassPill(label: "Share", icon: "square.and.arrow.up", tint: .blue.opacity(0.6)) {
+                    showShareSheet = true
                 }
 
-                Button(action: {
+                if !isPublished {
+                    if c2paManager.isProcessing {
+                        HStack(spacing: 6) {
+                            ProgressView().tint(.white)
+                            Text("Publishing…")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 13)
+                        .background(Capsule().fill(.ultraThinMaterial))
+                        .overlay(Capsule().stroke(.white.opacity(0.2), lineWidth: 0.5))
+                    } else {
+                        glassPill(label: "Publish", icon: "arrow.up.forward.app", tint: .purple.opacity(0.6)) {
+                            Task {
+                                do {
+                                    let url = try await c2paManager.uploadAndPublish(fileURL: fileURL)
+                                    signedFileURL = url
+                                    isPublished = true
+                                } catch {
+                                    errorMessage = error.localizedDescription
+                                    showError = true
+                                }
+                            }
+                        }
+                    }
+                }
+
+                glassPill(label: "New", icon: "camera.fill", tint: .white.opacity(0.15)) {
                     signedFileURL = nil
                     cameraService.capturedImage = nil
                     isPublished = false
-                }) {
-                    Text("New Photo")
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.gray.opacity(0.6))
-                        .cornerRadius(10)
                 }
             }
-            .padding(.bottom, 50)
+            .padding(.bottom, 28)
         }
-        .background(Color.black.edgesIgnoringSafeArea(.all))
     }
 
-    /// Camera live preview with shutter and Reset Keys buttons.
-    private var cameraLiveView: some View {
-        ZStack {
-            CameraPreview(cameraService: cameraService)
-                .ignoresSafeArea()
+    // MARK: - Reusable Glass Pill Button
 
-            VStack {
-                HStack {
-                    Spacer()
-
-                    Button(action: {
-                        C2PAManager.shared.resetCredentials()
-                    }) {
-                        VStack {
-                            Image(systemName: "gearshape.fill")
-                                .font(.title)
-                                .foregroundColor(.white)
-                            Text("Reset Keys")
-                                .font(.caption)
-                                .foregroundColor(.white)
-                        }
-                        .padding()
-                        .background(Color.black.opacity(0.5))
-                        .cornerRadius(10)
-                    }
-                    .padding(.top, 50)
-                    .padding(.trailing, 20)
-                }
-
-                Spacer()
-
-                Button(action: {
-                    cameraService.capturePhoto()
-                }) {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white, lineWidth: 4)
-                            .frame(width: 80, height: 80)
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 65, height: 65)
-                    }
-                }
-                .padding(.bottom, 40)
-            }
+    private func glassPill(
+        label: String,
+        icon: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 13)
+                .background(
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Capsule().fill(tint))
+                        .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                )
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
         }
     }
 }
