@@ -1,0 +1,42 @@
+{
+  "originHash" : "13355678d58212533e96527181cec2beff40012f92cd02c831e2a953134f1f08",
+  "pins" : [
+    {
+      "identity" : "c2pa-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/contentauth/c2pa-ios",
+      "state" : {
+        "branch" : "main",
+        "revision" : "733f329e7c5c0c0c107e80e7a6ab9ec8559f543a"
+      }
+    },
+    {
+      "identity" : "swift-asn1",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-asn1.git",
+      "state" : {
+        "revision" : "810496cf121e525d660cd0ea89a758740476b85f",
+        "version" : "1.5.1"
+      }
+    },
+    {
+      "identity" : "swift-certificates",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-certificates.git",
+      "state" : {
+        "revision" : "7d5f6124c91a2d06fb63a811695a3400d15a100e",
+        "version" : "1.17.1"
+      }
+    },
+    {
+      "identity" : "swift-crypto",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-crypto.git",
+      "state" : {
+        "revision" : "95ba0316a9b733e92bb6b071255ff46263bbe7dc",
+        "version" : "3.15.1"
+      }
+    }
+  ],
+  "version" : 3
+}
