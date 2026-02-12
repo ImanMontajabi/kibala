@@ -8,6 +8,7 @@ struct CameraView: View {
     @State private var errorMessage = ""
     @State private var signedFileURL: URL?
     @State private var showShareSheet = false
+    @State private var isPublished = false
 
     var body: some View {
         ZStack {
@@ -130,12 +131,15 @@ struct CameraView: View {
                         Spacer()
                         HStack {
                             Spacer()
-                            Label("C2PA Signed", systemImage: "checkmark.seal.fill")
+                            Label(
+                                isPublished ? "Published via Gateway" : "C2PA Signed",
+                                systemImage: isPublished ? "globe.badge.chevron.backward" : "checkmark.seal.fill"
+                            )
                                 .font(.caption)
                                 .fontWeight(.bold)
                                 .foregroundColor(.white)
                                 .padding(8)
-                                .background(Color.green.opacity(0.85))
+                                .background(isPublished ? Color.blue.opacity(0.85) : Color.green.opacity(0.85))
                                 .cornerRadius(8)
                                 .padding(12)
                         }
@@ -144,39 +148,85 @@ struct CameraView: View {
 
             Spacer()
 
-            Text("Signed photo saved to app Documents.")
+            Text(isPublished
+                 ? "Published photo re-signed by the Privacy Gateway."
+                 : "Signed photo saved to app Documents.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            Text("Use **Share** to upload the original file with C2PA credentials.")
+            Text(isPublished
+                 ? "The gateway's certificate replaces your device identity."
+                 : "Use **Share** to export, or **Publish** to re-sign via the gateway.")
                 .font(.caption2)
                 .foregroundColor(.gray.opacity(0.8))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            HStack(spacing: 20) {
+            HStack(spacing: 16) {
                 Button(action: {
                     showShareSheet = true
                 }) {
                     Label("Share", systemImage: "square.and.arrow.up")
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 20)
                         .padding(.vertical, 12)
                         .background(Color.blue)
                         .cornerRadius(10)
                 }
 
+                if !isPublished {
+                    Button(action: {
+                        guard let url = signedFileURL else { return }
+                        Task {
+                            do {
+                                let publishedURL = try await c2paManager.uploadAndPublish(fileURL: url)
+                                signedFileURL = publishedURL
+                                isPublished = true
+                            } catch {
+                                errorMessage = error.localizedDescription
+                                showError = true
+                                print("❌ Publish error: \(error)")
+                            }
+                        }
+                    }) {
+                        if c2paManager.isProcessing {
+                            HStack(spacing: 4) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                                Text("Publishing...")
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(Color.purple.opacity(0.7))
+                            .cornerRadius(10)
+                        } else {
+                            Label("Publish", systemImage: "arrow.up.forward.app")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color.purple)
+                                .cornerRadius(10)
+                        }
+                    }
+                    .disabled(c2paManager.isProcessing)
+                }
+
                 Button(action: {
                     signedFileURL = nil
                     cameraService.capturedImage = nil
+                    isPublished = false
                 }) {
                     Text("New Photo")
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 20)
                         .padding(.vertical, 12)
                         .background(Color.gray.opacity(0.6))
                         .cornerRadius(10)

@@ -111,6 +111,79 @@ class C2PAManager: ObservableObject {
         }
     }
 
+    // MARK: - Gateway Upload
+
+    /// Uploads a locally signed JPEG to the privacy gateway for re-signing.
+    ///
+    /// The gateway verifies the device's C2PA manifest, adds it as an
+    /// ingredient (parentOf), and re-signs with the gateway's own certificate.
+    /// Returns the URL of the re-signed JPEG saved to Documents.
+    func uploadAndPublish(fileURL: URL) async throws -> URL {
+        await MainActor.run {
+            isProcessing = true
+            lastError = nil
+        }
+
+        do {
+            guard let url = URL(string: "\(SERVER_URL)/api/v1/publish") else {
+                throw C2PASigningError.invalidServerURL
+            }
+
+            let fileData = try Data(contentsOf: fileURL)
+
+            // Build multipart/form-data request
+            let boundary = UUID().uuidString
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 60
+
+            var body = Data()
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+            body.append(fileData)
+            body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+            request.httpBody = body
+
+            print("🌐 Uploading to gateway: \(fileData.count) bytes")
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw C2PASigningError.networkError("Invalid response")
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown error"
+                throw C2PASigningError.networkError("Gateway \(httpResponse.statusCode): \(errorMsg)")
+            }
+
+            // Save the re-signed JPEG to Documents
+            let fm = FileManager.default
+            let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let kibalaDir = docsDir.appendingPathComponent("KibalaPhotos", isDirectory: true)
+            try fm.createDirectory(at: kibalaDir, withIntermediateDirectories: true)
+
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+            let timestamp = dateFormatter.string(from: Date())
+            let destURL = kibalaDir.appendingPathComponent("Kibala_Published_\(timestamp).jpg")
+
+            try data.write(to: destURL)
+
+            print("✅ Published photo saved: \(destURL.lastPathComponent) (\(data.count) bytes)")
+
+            await MainActor.run { isProcessing = false }
+            return destURL
+        } catch {
+            await MainActor.run {
+                isProcessing = false
+                lastError = error.localizedDescription
+            }
+            throw error
+        }
+    }
+
     // MARK: - Signing
 
     /// Synchronous signing logic — called from a detached Task, never from MainActor.
@@ -172,7 +245,7 @@ class C2PAManager: ObservableObject {
         // "format" is intentionally omitted — it is passed to builder.sign() instead.
         return """
         {
-            "claim_generator": "Kibala iOS App/1.0",
+            "claim_generator": "Kibala App/1.0",
             "title": "Kibala Secure Photo",
             "assertions": [
                 {
@@ -181,7 +254,7 @@ class C2PAManager: ObservableObject {
                         "actions": [
                             {
                                 "action": "c2pa.created",
-                                "softwareAgent": "Kibala Camera/1.0",
+                                "softwareAgent": "Kibala App/1.0",
                                 "when": "\(timestamp)"
                             }
                         ]
@@ -231,7 +304,7 @@ class C2PAManager: ObservableObject {
 
         let certConfig = CertificateManager.CertificateConfig(
             commonName: "Kibala Secure Camera",
-            organization: "imanmontajabi.com",
+            organization: "Kibala",
             organizationalUnit: "iOS Team",
             country: "DE",
             state: "Lower Saxony",
