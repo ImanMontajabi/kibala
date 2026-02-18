@@ -372,23 +372,48 @@ async def publish_photo(file: UploadFile = File(...)):
         # signature, effectively anonymizing the photographer.
         output_path = os.path.join(temp_dir, "published.jpg")
 
-        with c2pa.Signer.from_callback(
-            callback=gateway_sign_callback,
-            alg=c2pa.C2paSigningAlg.ES256,
-            certs=gateway_chain_pem,
-        ) as signer:
-            with c2pa.Builder(gateway_manifest) as builder:
-                builder.sign_file(
-                    source_path=clean_path,
-                    dest_path=output_path,
-                    signer=signer,
-                )
+        # Try with DigiCert RFC 3161 TSA first; fall back without TSA
+        # if the network is unreachable.
+        TSA_URL = "http://timestamp.digicert.com"
+        used_tsa = False
+
+        try:
+            with c2pa.Signer.from_callback(
+                callback=gateway_sign_callback,
+                alg=c2pa.C2paSigningAlg.ES256,
+                certs=gateway_chain_pem,
+                tsa_url=TSA_URL,
+            ) as signer:
+                with c2pa.Builder(gateway_manifest) as builder:
+                    builder.sign_file(
+                        source_path=clean_path,
+                        dest_path=output_path,
+                        signer=signer,
+                    )
+            used_tsa = True
+        except Exception as tsa_err:
+            if "Network is unreachable" in str(tsa_err) or "HTTP request" in str(tsa_err):
+                print(f"⚠️  TSA unreachable ({TSA_URL}), signing without trusted timestamp")
+                with c2pa.Signer.from_callback(
+                    callback=gateway_sign_callback,
+                    alg=c2pa.C2paSigningAlg.ES256,
+                    certs=gateway_chain_pem,
+                ) as signer:
+                    with c2pa.Builder(gateway_manifest) as builder:
+                        builder.sign_file(
+                            source_path=clean_path,
+                            dest_path=output_path,
+                            signer=signer,
+                        )
+            else:
+                raise
 
         # ── 5. Return re-signed image ──
         with open(output_path, "rb") as f:
             signed_data = f.read()
 
-        print(f"✅ Gateway published: {len(signed_data):,} bytes (only gateway signature)")
+        tsa_info = "DigiCert TSA timestamp" if used_tsa else "no TSA (offline)"
+        print(f"✅ Gateway published: {len(signed_data):,} bytes ({tsa_info})")
 
         return Response(
             content=signed_data,
